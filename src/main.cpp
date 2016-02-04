@@ -3,7 +3,6 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <EEPROM.h>
-#include <DNSServer.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 #include <ESP8266mDNS.h>
 #include <Button.h> 
@@ -37,13 +36,19 @@ ESP8266HTTPUpdateServer httpUpdater;
 
 void handle_root()
 {
-  server.send(200, "text/plain", "Lamp, read from /state");
+  webString="Switch state: "+String((int)state);   // Arduino has a hard time with float to string
+  server.send(200, "text/plain", webString);            // send to someones browser when asked
+  server.send(200, "text/plain", "open /on or /off to control outlet");
 }
 
-void handle_state()
+void handle_on()
 {
-  webString="state: "+String((int)state);   // Arduino has a hard time with float to string
-  server.send(200, "text/plain", webString);            // send to someones browser when asked
+  state = ON;
+}
+
+void handle_off()
+{
+  state = OFF;
 }
 
 void setup()
@@ -79,7 +84,8 @@ void setup()
   Serial.println(ESP.getFreeSketchSpace());
   
   server.on("/", handle_root);
-  server.on("/state", handle_state);
+  server.on("/on", handle_on);
+  server.on("/off", handle_off);
 
   httpUpdater.setup(&server);
 
