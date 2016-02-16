@@ -8,6 +8,7 @@
 #include <ESP8266mDNS.h>
 #include <Button.h> 
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
+#include <PubSubClient.h>
 
 
 #define ECOSWITCH 1
@@ -23,38 +24,37 @@
 #define LED_PIN 16
 #endif
 
-
 #define PULLUP true
 #define INVERT true
 #define DEBOUNCE_MS 100
 
 Button myBtn(BUTTON_PIN, PULLUP, INVERT, DEBOUNCE_MS);    //Declare the button
 
-#define OFF 0
-#define ON 1
+#define OFF 1
+#define ON 0
 
 
-int state = 0;
-
-
-
-String webString="";
 MDNSResponder mdns;
 ESP8266WebServer server(80);
 ESP8266HTTPUpdateServer httpUpdater;
 WiFiManager wifi;
-
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
 
 //define your default values here, if there are different values in config.json, they are overwritten.
 char device_name[40] = "espSwitch";
+char mqtt_topic[120];
 char mqtt_server[40];
-char mqtt_port[6] = "8080";
+char mqtt_port[6] = "1883";
+
+int state = OFF;
 
 //flag for saving data
 bool shouldSaveConfig = false;
 
 //callback notifying us of the need to save config
-void saveConfigCallback () {
+void saveConfigCallback ()
+{
   Serial.println("Should save config");
   shouldSaveConfig = true;
 }
@@ -74,7 +74,8 @@ R"(<html><body><form method='POST' action='/' enctype='multipart/form-data'>
                   </fieldset>
                </form></body></html>)";
 
-void handleNotFound() {
+void handleNotFound()
+{
 	String message = "File Not Found\n\n";
 	message += "URI: ";
 	message += server.uri();
@@ -84,7 +85,8 @@ void handleNotFound() {
 	message += server.args();
 	message += "\n";
 
-	for ( uint8_t i = 0; i < server.args(); i++ ) {
+	for ( uint8_t i = 0; i < server.args(); i++ )
+  {
 		message += " " + server.argName ( i ) + ": " + server.arg ( i ) + "\n";
 	}
 
@@ -95,13 +97,9 @@ void handle_root()
 {
   server.sendHeader("Connection", "close");
   server.sendHeader("Access-Control-Allow-Origin", "*");
-//  server.send(200, "text/html","<html><body>");
   server.send(200, "text/html",index_html);
-//  server.send(200, "text/html","</html></body>");
-//  webString="Switch state: "+String((int)state);   // Arduino has a hard time with float to string
-//  server.send(200, "text/plain", webString);            // send to someones browser when asked
-//  server.send(200, "text/plain", "open /on or /off to control outlet");
 }
+
 void handle_post()
 {
   if (server.args() == 3)
@@ -121,7 +119,8 @@ void handle_post()
     json["mqtt_port"] = server.arg(2);
 
     File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
+    if (!configFile)
+    {
       Serial.println("failed to open config file for writing");
     }
 
@@ -148,30 +147,69 @@ void handle_off()
   state = OFF;
 }
 
+void mqttCallback(char* topic, byte* payload, unsigned int length)
+{
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+
+  //ON
+  if ((char)payload[1] == 'N')
+  {
+    handle_on();
+  }
+  else
+  {
+    handle_off();
+  }
+}
+
+long lastReconnect = 0;
+
+void mqttReconnect()
+{
+  long now = millis();
+  if (now - lastReconnect > 5000)
+  {
+    lastReconnect = now;
+    Serial.print("Attempting MQTT connection as:");
+    Serial.println(device_name);
+    if (mqttClient.connect(device_name))
+    {
+      Serial.println("connected");
+      mqttClient.subscribe(mqtt_topic);
+    }
+    else
+    {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
   pinMode(BUTTON_PIN, INPUT);
- 
-  //If button pin pressed 1s after reset do a factory reset
-  delay(1000);
-  if (digitalRead(BUTTON_PIN) == 0)
-  {
-    Serial.println("Factory Reset");
-    SPIFFS.format();
-    wifi.resetSettings();
-  }
 
   //read configuration from FS json
   Serial.println("mounting FS...");
 
-  if (SPIFFS.begin()) {
+  if (SPIFFS.begin())
+  {
     Serial.println("mounted file system");
-    if (SPIFFS.exists("/config.json")) {
+    if (SPIFFS.exists("/config.json"))
+    {
       //file exists, reading and loading
       Serial.println("reading config file");
       File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile) {
+      if (configFile)
+      {
         Serial.println("opened config file");
         size_t size = configFile.size();
         // Allocate a buffer to store contents of the file.
@@ -181,28 +219,28 @@ void setup()
         DynamicJsonBuffer jsonBuffer;
         JsonObject& json = jsonBuffer.parseObject(buf.get());
         json.printTo(Serial);
-        if (json.success()) {
+        if (json.success())
+        {
           Serial.println("\nparsed json");
-
           strcpy(device_name, json["device_name"]);
           strcpy(mqtt_server, json["mqtt_server"]);
           strcpy(mqtt_port, json["mqtt_port"]);
-
-        } else {
+        }
+        else
+        {
           Serial.println("failed to load json config");
         }
       }
     }
-  } else {
+  }
+  else
+  {
     Serial.println("failed to mount FS");
   }
-  //end read
 
   WiFiManagerParameter custom_device_name("devicename", "device name", device_name, 40);
   WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 5);
-
-
 
    //set config save notify callback
   wifi.setSaveConfigCallback(saveConfigCallback);
@@ -220,7 +258,8 @@ void setup()
   wifi.autoConnect(device_name);
   
   //save the custom parameters to FS
-  if (shouldSaveConfig) {
+  if (shouldSaveConfig)
+  {
     Serial.println("saving config");
     DynamicJsonBuffer jsonBuffer;
     JsonObject& json = jsonBuffer.createObject();
@@ -229,14 +268,14 @@ void setup()
     json["mqtt_port"] = mqtt_port;
 
     File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
+    if (!configFile)
+    {
       Serial.println("failed to open config file for writing");
     }
 
     json.printTo(Serial);
     json.printTo(configFile);
     configFile.close();
-    //end save
   }
   Serial.print("mDNS Name: ");
   Serial.println(device_name);
@@ -270,15 +309,25 @@ void setup()
   Serial.println("State: OFF");
   pinMode(LED_PIN, OUTPUT);
 
-  
-  Serial.println("local ip");
+  Serial.print("local ip:");
   Serial.println(WiFi.localIP());
+
+  Serial.print("mqtt server Name: ");
+  Serial.println(mqtt_server);
+  mqttClient.setServer(mqtt_server, 1883);
+  mqttClient.setCallback(mqttCallback);
+  sprintf(mqtt_topic, "/%s/switch", device_name);
 }
 
 void loop()
 {
-  server.handleClient();
+  if (!mqttClient.connected())
+  {
+    mqttReconnect();
+  }
 
+  server.handleClient();
+  mqttClient.loop();
   myBtn.read();
 
   if (myBtn.wasPressed())
@@ -286,15 +335,23 @@ void loop()
     if (state == ON)
     {
       Serial.println("State: OFF");
+      mqttClient.publish(mqtt_topic, "OFF");
       state = OFF;
     }
     else
     {
       Serial.println("State: ON");
+      mqttClient.publish(mqtt_topic, "ON");
       state = ON;
     }
   }
+  if (myBtn.pressedFor(10000))
+  {
+    Serial.println("Factory Reset");
+    SPIFFS.format();
+    wifi.resetSettings();
+    ESP.restart();
+  }
   digitalWrite(LED_PIN, state);
-
 }
 
