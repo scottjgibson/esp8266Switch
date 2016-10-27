@@ -7,4 +7,6 @@ www.thegreatgeekery.com
 3) MQTT topics is /device_name/switch
 
 Example openhab device:
+```
 Switch TestPlug "Test Eco Plug" (all) {mqtt=">[broker:/ecoplug/switch:command:on:ON],>[broker:/ecoplug/switch:command:off:OFF]
+```
