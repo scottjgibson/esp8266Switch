@@ -13,12 +13,12 @@ Button button1(PIN_BUTTON); // Connect your button between pin 2 and GND
 bool lightOnHandler(HomieRange range, String value) {
   if (value == "true") {
     digitalWrite(PIN_RELAY, HIGH);
-    Homie.setNodeProperty(switchNode, "on").send("true");
+    switchNode.setProperty("on").send("true");
     Serial.println("Light is on");
   //  switchState = true;
   } else if (value == "false") {
     digitalWrite(PIN_RELAY, LOW);
-    Homie.setNodeProperty(switchNode, "on").send("false");
+    switchNode.setProperty("on").send("false");
     Serial.println("Light is off");
 //    switchState = false;
   } else {
@@ -56,3 +56,4 @@ void loop() {
   
 
 }
+
